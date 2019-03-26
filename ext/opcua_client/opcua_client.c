@@ -5,10 +5,6 @@ VALUE cClient;
 VALUE cError;
 VALUE mOPCUAClient;
 
-struct mystruct {
-    UA_Client *client;
-};
-
 VALUE raise_invalid_arguments_error() {
     rb_raise(cError, "Invalid arguments");
     return Qnil;
@@ -24,15 +20,15 @@ static void UA_Client_free(void *self) {
     UA_Client_delete(self);
 }
 
-static const rb_data_type_t MyStructType = {
-    "MyStruct",
+static const rb_data_type_t UA_Client_Type = {
+    "UA_Client",
     { 0, UA_Client_free, 0 },
     0, 0, RUBY_TYPED_FREE_IMMEDIATELY,
 };
 
 static VALUE allocate(VALUE klass) {
     UA_Client *client = UA_Client_new(UA_ClientConfig_default);
-    return TypedData_Wrap_Struct(klass, &MyStructType, client);
+    return TypedData_Wrap_Struct(klass, &UA_Client_Type, client);
 }
 
 static VALUE rb_connect(VALUE self, VALUE v_connectionString) {
@@ -43,7 +39,7 @@ static VALUE rb_connect(VALUE self, VALUE v_connectionString) {
     char *connectionString = StringValueCStr(v_connectionString);
     
     UA_Client *client;
-    TypedData_Get_Struct(self, UA_Client, &MyStructType, client);
+    TypedData_Get_Struct(self, UA_Client, &UA_Client_Type, client);
     
     UA_StatusCode status = UA_Client_connect(client, connectionString);
     
@@ -56,7 +52,7 @@ static VALUE rb_connect(VALUE self, VALUE v_connectionString) {
 
 static VALUE rb_disconnect(VALUE self) {
     UA_Client *client;
-    TypedData_Get_Struct(self, UA_Client, &MyStructType, client);
+    TypedData_Get_Struct(self, UA_Client, &UA_Client_Type, client);
     UA_StatusCode status = UA_Client_disconnect(client);
     return RB_UINT2NUM(status);
 }
@@ -74,7 +70,7 @@ static VALUE rb_readInt16Value(VALUE self, VALUE v_nsIndex, VALUE v_name) {
     int nsIndex = FIX2INT(v_nsIndex);
     
     UA_Client *client;
-    TypedData_Get_Struct(self, UA_Client, &MyStructType, client);
+    TypedData_Get_Struct(self, UA_Client, &UA_Client_Type, client);
     
     UA_Variant value;
     UA_Variant_init(&value);
