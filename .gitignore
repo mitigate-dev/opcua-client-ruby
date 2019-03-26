@@ -1,0 +1,11 @@
+.DS_Store
+Makefile
+*.o
+*.bundle
+*.so
+*.a
+mkmf.log
+Gemfile.lock
+.ruby-gemset
+.ruby-version
+opcua_client-*.gem
