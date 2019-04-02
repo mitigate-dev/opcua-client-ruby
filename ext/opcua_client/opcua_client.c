@@ -57,6 +57,49 @@ static VALUE rb_disconnect(VALUE self) {
     return RB_UINT2NUM(status);
 }
 
+static VALUE rb_writeInt16Value(VALUE self, VALUE v_nsIndex, VALUE v_name, VALUE v_newValue) {
+    if (RB_TYPE_P(v_name, T_STRING) != 1) {
+        return raise_invalid_arguments_error();
+    }
+    
+    if (RB_TYPE_P(v_nsIndex, T_FIXNUM) != 1) {
+        return raise_invalid_arguments_error();
+    }
+    
+    if (RB_TYPE_P(v_newValue, T_FIXNUM) != 1) {
+        return raise_invalid_arguments_error();
+    }
+    
+    char *name = StringValueCStr(v_name);
+    int nsIndex = FIX2INT(v_nsIndex);
+    UA_Int16 newValue = FIX2INT(v_newValue);
+    
+    UA_Client *client;
+    TypedData_Get_Struct(self, UA_Client, &UA_Client_Type, client);
+    
+    UA_Variant value;
+    UA_Variant_init(&value);
+    
+    value.data = UA_malloc(sizeof(UA_Int16));
+    *(UA_Int16*)value.data = newValue;
+    value.type = &UA_TYPES[UA_TYPES_INT16];
+    
+    UA_StatusCode status = UA_Client_writeValueAttribute(client, UA_NODEID_STRING(nsIndex, name), &value);
+    
+    if (status == UA_STATUSCODE_GOOD) {
+        // printf("%s\n", "value write successful");
+    } else {
+        /* Clean up */
+        UA_Variant_deleteMembers(&value);
+        return raise_ua_status_error(status);
+    }
+    
+    /* Clean up */
+    UA_Variant_deleteMembers(&value);
+    
+    return Qnil;
+}
+
 static VALUE rb_readInt16Value(VALUE self, VALUE v_nsIndex, VALUE v_name) {
     if (RB_TYPE_P(v_name, T_STRING) != 1) {
         return raise_invalid_arguments_error();
@@ -121,6 +164,7 @@ void Init_opcua_client()
     rb_define_method(cClient, "connect", rb_connect, 1);
     rb_define_method(cClient, "disconnect", rb_disconnect, 0);
     rb_define_method(cClient, "read_int16", rb_readInt16Value, 2);
+    rb_define_method(cClient, "write_int16", rb_writeInt16Value, 3);
     
     rb_define_singleton_method(mOPCUAClient, "human_status_code", rb_get_human_UA_StatusCode, 1);
 }
