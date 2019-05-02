@@ -5,6 +5,15 @@ VALUE cClient;
 VALUE cError;
 VALUE mOPCUAClient;
 
+struct UninitializedClient {
+    UA_Client *client;
+};
+
+struct OpcuaClientContext {
+    UA_UInt16 monNsIndex;
+    UA_UInt32 monIdentifier;
+};
+
 static void
 handler_currentTimeChanged(UA_Client *client, UA_UInt32 subId, void *subContext,
                            UA_UInt32 monId, void *monContext, UA_DataValue *value) {
@@ -28,6 +37,8 @@ subscriptionInactivityCallback (UA_Client *client, UA_UInt32 subscriptionId, voi
 
 static void
 stateCallback (UA_Client *client, UA_ClientState clientState) {
+    struct OpcuaClientContext *ctx = UA_Client_getContext(client);
+    
     switch(clientState) {
         case UA_CLIENTSTATE_DISCONNECTED:
             printf("%s\n", "The client is disconnected");
@@ -46,7 +57,7 @@ stateCallback (UA_Client *client, UA_ClientState clientState) {
             if (response.responseHeader.serviceResult == UA_STATUSCODE_GOOD) {
                 printf("Create subscription succeeded, id %u\n", response.subscriptionId);
                 
-                UA_MonitoredItemCreateRequest monRequest = UA_MonitoredItemCreateRequest_default(UA_NODEID_NUMERIC(0, UA_NS0ID_SERVER_SERVERSTATUS_CURRENTTIME));
+                UA_MonitoredItemCreateRequest monRequest = UA_MonitoredItemCreateRequest_default(UA_NODEID_NUMERIC(ctx->monNsIndex, ctx->monIdentifier));
                 
                 UA_MonitoredItemCreateResult monResponse =
                 UA_Client_MonitoredItems_createDataChange(client, response.subscriptionId,
@@ -65,10 +76,6 @@ stateCallback (UA_Client *client, UA_ClientState clientState) {
     return;
 }
 
-struct UninitializedClient {
-    UA_Client *client;
-};
-
 VALUE raise_invalid_arguments_error() {
     rb_raise(cError, "Invalid arguments");
     return Qnil;
@@ -84,7 +91,14 @@ static void UA_Client_free(void *self) {
     // UA_Client_delete(self);
     
     struct UninitializedClient *uclient = self;
-    if (uclient->client) UA_Client_delete(uclient->client);
+    
+    if (uclient->client) {
+        struct OpcuaClientContext *ctx = UA_Client_getContext(uclient->client);
+        xfree(ctx);
+        
+        UA_Client_delete(uclient->client);
+    }
+
     xfree(self);
 }
 
@@ -95,8 +109,7 @@ static const rb_data_type_t UA_Client_Type = {
 };
 
 static VALUE allocate(VALUE klass) {
-    struct UninitializedClient *uclient;
-    uclient = ALLOC(struct UninitializedClient);
+    struct UninitializedClient *uclient = ALLOC(struct UninitializedClient);
     return TypedData_Wrap_Struct(klass, &UA_Client_Type, uclient);
 }
 
@@ -107,6 +120,13 @@ static VALUE rb_initialize(VALUE self) {
     UA_ClientConfig customConfig = UA_ClientConfig_default;
     customConfig.stateCallback = stateCallback;
     customConfig.subscriptionInactivityCallback = subscriptionInactivityCallback;
+    
+    struct OpcuaClientContext *ctx = ALLOC(struct OpcuaClientContext);
+    // TODO: from ruby
+    ctx->monNsIndex = 0;
+    ctx->monIdentifier = UA_NS0ID_SERVER_SERVERSTATUS_CURRENTTIME;
+
+    customConfig.clientContext = ctx;
     
     uclient->client = UA_Client_new(customConfig);
     
