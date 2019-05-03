@@ -11,17 +11,19 @@ struct UninitializedClient {
 
 struct OpcuaClientContext {
     UA_UInt16 monNsIndex;
-    UA_UInt32 monIdentifier;
+    char* monNsName;
 };
 
 static void
-handler_currentTimeChanged(UA_Client *client, UA_UInt32 subId, void *subContext,
+handler_dataChanged(UA_Client *client, UA_UInt32 subId, void *subContext,
                            UA_UInt32 monId, void *monContext, UA_DataValue *value) {
-    printf("currentTime has changed!\n");
     if(UA_Variant_hasScalarType(&value->value, &UA_TYPES[UA_TYPES_DATETIME])) {
         UA_DateTime raw_date = *(UA_DateTime *) value->value.data;
         UA_DateTimeStruct dts = UA_DateTime_toStruct(raw_date);
-        printf("date is: %02u-%02u-%04u %02u:%02u:%02u.%03u", dts.day, dts.month, dts.year, dts.hour, dts.min, dts.sec, dts.milliSec);
+        printf("New date is: %02u-%02u-%04u %02u:%02u:%02u.%03u\n", dts.day, dts.month, dts.year, dts.hour, dts.min, dts.sec, dts.milliSec);
+    } else if (UA_Variant_hasScalarType(&value->value, &UA_TYPES[UA_TYPES_INT32])) {
+        UA_Int32 number = *(UA_Int32 *) value->value.data;
+        printf("New number received: %u\n", number);
     }
 }
 
@@ -51,23 +53,30 @@ stateCallback (UA_Client *client, UA_ClientState clientState) {
             break;
         case UA_CLIENTSTATE_SESSION:
             printf("%s\n", "A new session was created");
-            UA_CreateSubscriptionRequest request = UA_CreateSubscriptionRequest_default();
-            UA_CreateSubscriptionResponse response = UA_Client_Subscriptions_create(client, request, NULL, NULL, deleteSubscriptionCallback);
             
-            if (response.responseHeader.serviceResult == UA_STATUSCODE_GOOD) {
-                printf("Create subscription succeeded, id %u\n", response.subscriptionId);
+            if (ctx->monNsName) {
+                UA_CreateSubscriptionRequest request = UA_CreateSubscriptionRequest_default();
+                UA_CreateSubscriptionResponse response = UA_Client_Subscriptions_create(client, request, NULL, NULL, deleteSubscriptionCallback);
                 
-                UA_MonitoredItemCreateRequest monRequest = UA_MonitoredItemCreateRequest_default(UA_NODEID_NUMERIC(ctx->monNsIndex, ctx->monIdentifier));
-                
-                UA_MonitoredItemCreateResult monResponse =
-                UA_Client_MonitoredItems_createDataChange(client, response.subscriptionId,
-                                                          UA_TIMESTAMPSTORETURN_BOTH,
-                                                          monRequest, NULL, handler_currentTimeChanged, NULL);
-                if (monResponse.statusCode == UA_STATUSCODE_GOOD) {
-                    printf("Monitoring UA_NS0ID_SERVER_SERVERSTATUS_CURRENTTIME, id %u\n", monResponse.monitoredItemId);
+                if (response.responseHeader.serviceResult == UA_STATUSCODE_GOOD) {
+                    printf("Create subscription succeeded, id %u\n", response.subscriptionId);
+                    
+                    UA_MonitoredItemCreateRequest monRequest = UA_MonitoredItemCreateRequest_default(UA_NODEID_STRING(ctx->monNsIndex, ctx->monNsName));
+                    
+                    UA_MonitoredItemCreateResult monResponse =
+                    UA_Client_MonitoredItems_createDataChange(client, response.subscriptionId,
+                                                              UA_TIMESTAMPSTORETURN_BOTH,
+                                                              monRequest, NULL, handler_dataChanged, NULL);
+                    if (monResponse.statusCode == UA_STATUSCODE_GOOD) {
+                        printf("Request to monitor field %hu:%s successful, id %u\n", ctx->monNsIndex, ctx->monNsName, monResponse.monitoredItemId);
+                    } else {
+                        printf("Request to monitor field failed: %s\n", UA_StatusCode_name(monResponse.statusCode));
+                    }
+                    
+                    // multiple monitors per subscription are OK.
                 }
             }
-
+            
             break;
         case UA_CLIENTSTATE_SESSION_RENEWED:
             /* The session was renewed. We don't need to recreate the subscription. */
@@ -87,9 +96,6 @@ VALUE raise_ua_status_error(UA_StatusCode status) {
 }
 
 static void UA_Client_free(void *self) {
-    // printf("%s\n", "calling UA_Client_delete");
-    // UA_Client_delete(self);
-    
     struct UninitializedClient *uclient = self;
     
     if (uclient->client) {
@@ -113,7 +119,22 @@ static VALUE allocate(VALUE klass) {
     return TypedData_Wrap_Struct(klass, &UA_Client_Type, uclient);
 }
 
-static VALUE rb_initialize(VALUE self) {
+//static VALUE rb_initialize(VALUE self, VALUE v_monArray) {
+static VALUE rb_initialize(int argc, VALUE* argv, VALUE self) {
+    VALUE v_monArray = Qnil;
+    
+    if (argc == 0) {
+        v_monArray = Qnil;
+    } else {
+        v_monArray = argv[0];
+    }
+    
+    if (!NIL_P(v_monArray)) {
+        if (RB_TYPE_P(v_monArray, T_ARRAY) != 1 || rb_array_len(v_monArray) == 0) {
+            return raise_invalid_arguments_error();
+        }
+    }
+
     struct UninitializedClient * uclient;
     TypedData_Get_Struct(self, struct UninitializedClient, &UA_Client_Type, uclient);
     
@@ -122,9 +143,33 @@ static VALUE rb_initialize(VALUE self) {
     customConfig.subscriptionInactivityCallback = subscriptionInactivityCallback;
     
     struct OpcuaClientContext *ctx = ALLOC(struct OpcuaClientContext);
-    // TODO: from ruby
-    ctx->monNsIndex = 0;
-    ctx->monIdentifier = UA_NS0ID_SERVER_SERVERSTATUS_CURRENTTIME;
+    
+    if (!NIL_P(v_monArray)) {
+        VALUE first = rb_ary_entry(v_monArray, 0);
+        
+        if (NIL_P(first) || RB_TYPE_P(first, T_ARRAY) != 1 || rb_array_len(first) != 2) {
+            return raise_invalid_arguments_error();
+        }
+        
+        VALUE v_monNsIndex = rb_ary_entry(first, 0);
+        VALUE v_monNsName = rb_ary_entry(first, 1);
+        
+        if (RB_TYPE_P(v_monNsIndex, T_FIXNUM) != 1) {
+            return raise_invalid_arguments_error();
+        }
+        
+        if (RB_TYPE_P(v_monNsName, T_STRING) != 1) {
+            return raise_invalid_arguments_error();
+        }
+        
+        UA_UInt16 monNsIndex = NUM2USHORT(v_monNsIndex);
+        char *monNsName = StringValueCStr(v_monNsName);
+        
+        // printf("mon configured %hu:%s\n", monNsIndex, monNsName);
+    
+        ctx->monNsIndex = monNsIndex;
+        ctx->monNsName = monNsName;
+    }
 
     customConfig.clientContext = ctx;
     
@@ -356,7 +401,8 @@ void Init_opcua_client()
     
     rb_define_alloc_func(cClient, allocate);
     
-    rb_define_method(cClient, "initialize", rb_initialize, 0);
+    rb_define_method(cClient, "initialize", rb_initialize, -1);
+    
     rb_define_method(cClient, "run_single_monitoring_cycle", rb_run_single_monitoring_cycle, 0);
     rb_define_method(cClient, "run_mon_cycle", rb_run_single_monitoring_cycle, 0);
     rb_define_method(cClient, "do_mon_cycle", rb_run_single_monitoring_cycle, 0);
