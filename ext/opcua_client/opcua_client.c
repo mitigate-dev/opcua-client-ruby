@@ -12,11 +12,16 @@ struct UninitializedClient {
 struct OpcuaClientContext {
     UA_UInt16 monNsIndex;
     char* monNsName;
+    VALUE passthrough;
 };
 
 static void
 handler_dataChanged(UA_Client *client, UA_UInt32 subId, void *subContext,
                            UA_UInt32 monId, void *monContext, UA_DataValue *value) {
+    struct OpcuaClientContext *ctx = UA_Client_getContext(client);
+    VALUE callback = rb_ary_entry(ctx->passthrough, 0);
+    rb_proc_call(callback, rb_ary_new());
+    
     if(UA_Variant_hasScalarType(&value->value, &UA_TYPES[UA_TYPES_DATETIME])) {
         UA_DateTime raw_date = *(UA_DateTime *) value->value.data;
         UA_DateTimeStruct dts = UA_DateTime_toStruct(raw_date);
@@ -122,19 +127,26 @@ static VALUE allocate(VALUE klass) {
 //static VALUE rb_initialize(VALUE self, VALUE v_monArray) {
 static VALUE rb_initialize(int argc, VALUE* argv, VALUE self) {
     VALUE v_monArray = Qnil;
+    VALUE v_monCallback = Qnil;
     
     if (argc == 0) {
         v_monArray = Qnil;
-    } else {
+    } else if (argc == 2) {
         v_monArray = argv[0];
+        v_monCallback = argv[1];
+    } else {
+        return raise_invalid_arguments_error();
     }
     
     if (!NIL_P(v_monArray)) {
         if (RB_TYPE_P(v_monArray, T_ARRAY) != 1 || rb_array_len(v_monArray) == 0) {
             return raise_invalid_arguments_error();
         }
+        if (rb_class_of(v_monCallback) != rb_cProc) {
+            return raise_invalid_arguments_error();
+        }
     }
-
+    
     struct UninitializedClient * uclient;
     TypedData_Get_Struct(self, struct UninitializedClient, &UA_Client_Type, uclient);
     
@@ -146,6 +158,10 @@ static VALUE rb_initialize(int argc, VALUE* argv, VALUE self) {
     
     if (!NIL_P(v_monArray)) {
         VALUE first = rb_ary_entry(v_monArray, 0);
+        
+        // this should protect proc from being garbage collected (?!)
+        VALUE passthrough = rb_ary_new();
+        rb_ary_store(passthrough, 0, v_monCallback);
         
         if (NIL_P(first) || RB_TYPE_P(first, T_ARRAY) != 1 || rb_array_len(first) != 2) {
             return raise_invalid_arguments_error();
@@ -169,6 +185,7 @@ static VALUE rb_initialize(int argc, VALUE* argv, VALUE self) {
     
         ctx->monNsIndex = monNsIndex;
         ctx->monNsName = monNsName;
+        ctx->passthrough = passthrough;
     }
 
     customConfig.clientContext = ctx;
