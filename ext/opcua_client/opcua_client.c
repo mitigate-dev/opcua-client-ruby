@@ -10,17 +10,18 @@ struct UninitializedClient {
 };
 
 struct OpcuaClientContext {
-    UA_UInt16 monNsIndex;
-    char* monNsName;
-    VALUE passthrough;
+    VALUE rubyClientInstance;
 };
 
 static void
 handler_dataChanged(UA_Client *client, UA_UInt32 subId, void *subContext,
                            UA_UInt32 monId, void *monContext, UA_DataValue *value) {
+    // printf("data changed\n");
+    
     struct OpcuaClientContext *ctx = UA_Client_getContext(client);
-    VALUE callback = rb_ary_entry(ctx->passthrough, 0);
-    rb_proc_call(callback, rb_ary_new());
+    VALUE self = ctx->rubyClientInstance;
+    VALUE callback = rb_ivar_get(self, rb_intern("@callback"));
+    if (!NIL_P(callback)) rb_proc_call(callback, rb_ary_new());
     
     if(UA_Variant_hasScalarType(&value->value, &UA_TYPES[UA_TYPES_DATETIME])) {
         UA_DateTime raw_date = *(UA_DateTime *) value->value.data;
@@ -46,6 +47,8 @@ static void
 stateCallback (UA_Client *client, UA_ClientState clientState) {
     struct OpcuaClientContext *ctx = UA_Client_getContext(client);
     
+    // printf("%s\n", "state change");
+    
     switch(clientState) {
         case UA_CLIENTSTATE_DISCONNECTED:
             printf("%s\n", "The client is disconnected");
@@ -57,27 +60,34 @@ stateCallback (UA_Client *client, UA_ClientState clientState) {
             printf("%s\n", "A SecureChannel to the server is open");
             break;
         case UA_CLIENTSTATE_SESSION:
-            printf("%s\n", "A new session was created");
+            printf("%s\n", "A new session was created!");
             
-            if (ctx->monNsName) {
+            VALUE self = ctx->rubyClientInstance;
+            VALUE rbMonNsIndex = rb_ivar_get(self, rb_intern("@mon_ns_index"));
+            VALUE rbMonNsName = rb_ivar_get(self, rb_intern("@mon_ns_name"));
+            
+            if (!NIL_P(rbMonNsName)) {
+                UA_UInt16 monNsIndex = NUM2USHORT(rbMonNsIndex);
+                char* monNsName = StringValueCStr(rbMonNsName);
+                
                 UA_CreateSubscriptionRequest request = UA_CreateSubscriptionRequest_default();
                 UA_CreateSubscriptionResponse response = UA_Client_Subscriptions_create(client, request, NULL, NULL, deleteSubscriptionCallback);
-                
+
                 if (response.responseHeader.serviceResult == UA_STATUSCODE_GOOD) {
                     printf("Create subscription succeeded, id %u\n", response.subscriptionId);
-                    
-                    UA_MonitoredItemCreateRequest monRequest = UA_MonitoredItemCreateRequest_default(UA_NODEID_STRING(ctx->monNsIndex, ctx->monNsName));
-                    
+
+                    UA_MonitoredItemCreateRequest monRequest = UA_MonitoredItemCreateRequest_default(UA_NODEID_STRING(monNsIndex, monNsName));
+
                     UA_MonitoredItemCreateResult monResponse =
                     UA_Client_MonitoredItems_createDataChange(client, response.subscriptionId,
                                                               UA_TIMESTAMPSTORETURN_BOTH,
                                                               monRequest, NULL, handler_dataChanged, NULL);
                     if (monResponse.statusCode == UA_STATUSCODE_GOOD) {
-                        printf("Request to monitor field %hu:%s successful, id %u\n", ctx->monNsIndex, ctx->monNsName, monResponse.monitoredItemId);
+                        printf("Request to monitor field %hu:%s successful, id %u\n", monNsIndex, monNsName, monResponse.monitoredItemId);
                     } else {
                         printf("Request to monitor field failed: %s\n", UA_StatusCode_name(monResponse.statusCode));
                     }
-                    
+
                     // multiple monitors per subscription are OK.
                 }
             }
@@ -101,6 +111,7 @@ VALUE raise_ua_status_error(UA_StatusCode status) {
 }
 
 static void UA_Client_free(void *self) {
+    printf("free client\n");
     struct UninitializedClient *uclient = self;
     
     if (uclient->client) {
@@ -119,35 +130,14 @@ static const rb_data_type_t UA_Client_Type = {
 };
 
 static VALUE allocate(VALUE klass) {
+    printf("allocate client\n");
     struct UninitializedClient *uclient = ALLOC(struct UninitializedClient);
     *uclient = (const struct UninitializedClient){ 0 };
     
     return TypedData_Wrap_Struct(klass, &UA_Client_Type, uclient);
 }
 
-//static VALUE rb_initialize(VALUE self, VALUE v_monArray) {
-static VALUE rb_initialize(int argc, VALUE* argv, VALUE self) {
-    VALUE v_monArray = Qnil;
-    VALUE v_monCallback = Qnil;
-    
-    if (argc == 0) {
-        v_monArray = Qnil;
-    } else if (argc == 2) {
-        v_monArray = argv[0];
-        v_monCallback = argv[1];
-    } else {
-        return raise_invalid_arguments_error();
-    }
-    
-    if (!NIL_P(v_monArray)) {
-        if (RB_TYPE_P(v_monArray, T_ARRAY) != 1 || rb_array_len(v_monArray) == 0) {
-            return raise_invalid_arguments_error();
-        }
-        if (rb_class_of(v_monCallback) != rb_cProc) {
-            return raise_invalid_arguments_error();
-        }
-    }
-    
+static VALUE rb_initialize(VALUE self) {
     struct UninitializedClient * uclient;
     TypedData_Get_Struct(self, struct UninitializedClient, &UA_Client_Type, uclient);
     
@@ -158,38 +148,7 @@ static VALUE rb_initialize(int argc, VALUE* argv, VALUE self) {
     struct OpcuaClientContext *ctx = ALLOC(struct OpcuaClientContext);
     *ctx = (const struct OpcuaClientContext){ 0 };
     
-    if (!NIL_P(v_monArray)) {
-        VALUE first = rb_ary_entry(v_monArray, 0);
-        
-        // this should protect proc from being garbage collected (?!)
-        VALUE passthrough = rb_ary_new();
-        rb_ary_store(passthrough, 0, v_monCallback);
-        
-        if (NIL_P(first) || RB_TYPE_P(first, T_ARRAY) != 1 || rb_array_len(first) != 2) {
-            return raise_invalid_arguments_error();
-        }
-        
-        VALUE v_monNsIndex = rb_ary_entry(first, 0);
-        VALUE v_monNsName = rb_ary_entry(first, 1);
-        
-        if (RB_TYPE_P(v_monNsIndex, T_FIXNUM) != 1) {
-            return raise_invalid_arguments_error();
-        }
-        
-        if (RB_TYPE_P(v_monNsName, T_STRING) != 1) {
-            return raise_invalid_arguments_error();
-        }
-        
-        UA_UInt16 monNsIndex = NUM2USHORT(v_monNsIndex);
-        char *monNsName = StringValueCStr(v_monNsName);
-        
-        // printf("mon configured %hu:%s\n", monNsIndex, monNsName);
-    
-        ctx->monNsIndex = monNsIndex;
-        ctx->monNsName = monNsName;
-        ctx->passthrough = passthrough;
-    }
-
+    ctx->rubyClientInstance = self;
     customConfig.clientContext = ctx;
     
     uclient->client = UA_Client_new(customConfig);
@@ -413,11 +372,8 @@ VALUE _rb_test_callback_exec(VALUE self) {
     TypedData_Get_Struct(self, struct UninitializedClient, &UA_Client_Type, uclient);
     UA_Client *client = uclient->client;
     
-    struct OpcuaClientContext *ctx = UA_Client_getContext(client);
-    if (ctx->passthrough) {
-        VALUE callback = rb_ary_entry(ctx->passthrough, 0);
-        rb_proc_call(callback, rb_ary_new());
-    }
+    VALUE callback = rb_ivar_get(self, rb_intern("@callback"));
+    if (!NIL_P(callback)) rb_proc_call(callback, rb_ary_new());
     
     return Qnil;
 }
@@ -429,12 +385,13 @@ void Init_opcua_client()
 #endif
     
     mOPCUAClient = rb_const_get(rb_cObject, rb_intern("OPCUAClient"));
+    
     cError = rb_define_class_under(mOPCUAClient, "Error", rb_eStandardError);
     cClient = rb_define_class_under(mOPCUAClient, "Client", rb_cObject);
     
     rb_define_alloc_func(cClient, allocate);
     
-    rb_define_method(cClient, "initialize", rb_initialize, -1);
+    rb_define_method(cClient, "initialize", rb_initialize, 0);
     
     rb_define_method(cClient, "run_single_monitoring_cycle", rb_run_single_monitoring_cycle, 0);
     rb_define_method(cClient, "run_mon_cycle", rb_run_single_monitoring_cycle, 0);
