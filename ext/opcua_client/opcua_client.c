@@ -106,7 +106,6 @@ static void UA_Client_free(void *self) {
     if (uclient->client) {
         struct OpcuaClientContext *ctx = UA_Client_getContext(uclient->client);
         xfree(ctx);
-        
         UA_Client_delete(uclient->client);
     }
 
@@ -121,6 +120,8 @@ static const rb_data_type_t UA_Client_Type = {
 
 static VALUE allocate(VALUE klass) {
     struct UninitializedClient *uclient = ALLOC(struct UninitializedClient);
+    *uclient = (const struct UninitializedClient){ 0 };
+    
     return TypedData_Wrap_Struct(klass, &UA_Client_Type, uclient);
 }
 
@@ -155,6 +156,7 @@ static VALUE rb_initialize(int argc, VALUE* argv, VALUE self) {
     customConfig.subscriptionInactivityCallback = subscriptionInactivityCallback;
     
     struct OpcuaClientContext *ctx = ALLOC(struct OpcuaClientContext);
+    *ctx = (const struct OpcuaClientContext){ 0 };
     
     if (!NIL_P(v_monArray)) {
         VALUE first = rb_ary_entry(v_monArray, 0);
@@ -406,6 +408,20 @@ VALUE rb_run_single_monitoring_cycle_bang(VALUE self) {
     return Qnil;
 }
 
+VALUE _rb_test_callback_exec(VALUE self) {
+    struct UninitializedClient * uclient;
+    TypedData_Get_Struct(self, struct UninitializedClient, &UA_Client_Type, uclient);
+    UA_Client *client = uclient->client;
+    
+    struct OpcuaClientContext *ctx = UA_Client_getContext(client);
+    if (ctx->passthrough) {
+        VALUE callback = rb_ary_entry(ctx->passthrough, 0);
+        rb_proc_call(callback, rb_ary_new());
+    }
+    
+    return Qnil;
+}
+
 void Init_opcua_client()
 {
 #ifdef UA_ENABLE_SUBSCRIPTIONS
@@ -423,6 +439,8 @@ void Init_opcua_client()
     rb_define_method(cClient, "run_single_monitoring_cycle", rb_run_single_monitoring_cycle, 0);
     rb_define_method(cClient, "run_mon_cycle", rb_run_single_monitoring_cycle, 0);
     rb_define_method(cClient, "do_mon_cycle", rb_run_single_monitoring_cycle, 0);
+    
+    rb_define_method(cClient, "_test_callback_exec", _rb_test_callback_exec, 0);
     
     rb_define_method(cClient, "run_single_monitoring_cycle!", rb_run_single_monitoring_cycle_bang, 0);
     rb_define_method(cClient, "run_mon_cycle!", rb_run_single_monitoring_cycle_bang, 0);

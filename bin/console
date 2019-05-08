@@ -1,0 +1,12 @@
+#!/usr/bin/env ruby
+
+require "bundler/setup"
+require 'pry'
+
+require 'opcua_client'
+
+$0 = 'pry'
+
+# Process command line options and run Pry
+opts = Pry::CLI.parse_options
+Pry::CLI.start(opts)
