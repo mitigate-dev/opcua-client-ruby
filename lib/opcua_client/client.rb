@@ -1,15 +1,11 @@
 module OPCUAClient
   class Client
-    def configure_monitoring(items, callback)
-      @items = items
+    def after_session_created(&block)
+      @callback_after_session_created = block
+    end
 
-      # TODO: monitor all items
-      if items.first
-        @mon_ns_index = items.first[0]
-        @mon_ns_name = items.first[1]
-      end
-
-      @callback = callback
+    def after_data_changed(&block)
+      @callback_after_data_changed = block
     end
   end
 end

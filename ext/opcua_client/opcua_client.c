@@ -16,11 +16,9 @@ struct OpcuaClientContext {
 static void
 handler_dataChanged(UA_Client *client, UA_UInt32 subId, void *subContext,
                            UA_UInt32 monId, void *monContext, UA_DataValue *value) {
-    // printf("data changed\n");
-    
     struct OpcuaClientContext *ctx = UA_Client_getContext(client);
     VALUE self = ctx->rubyClientInstance;
-    VALUE callback = rb_ivar_get(self, rb_intern("@callback"));
+    VALUE callback = rb_ivar_get(self, rb_intern("@callback_after_data_changed"));
     if (!NIL_P(callback)) rb_proc_call(callback, rb_ary_new());
     
     if(UA_Variant_hasScalarType(&value->value, &UA_TYPES[UA_TYPES_DATETIME])) {
@@ -39,15 +37,13 @@ deleteSubscriptionCallback(UA_Client *client, UA_UInt32 subscriptionId, void *su
 }
 
 static void
-subscriptionInactivityCallback (UA_Client *client, UA_UInt32 subscriptionId, void *subContext) {
+subscriptionInactivityCallback(UA_Client *client, UA_UInt32 subscriptionId, void *subContext) {
     printf("Inactivity for subscription %u", subscriptionId);
 }
 
 static void
 stateCallback (UA_Client *client, UA_ClientState clientState) {
     struct OpcuaClientContext *ctx = UA_Client_getContext(client);
-    
-    // printf("%s\n", "state change");
     
     switch(clientState) {
         case UA_CLIENTSTATE_DISCONNECTED:
@@ -63,33 +59,12 @@ stateCallback (UA_Client *client, UA_ClientState clientState) {
             printf("%s\n", "A new session was created!");
             
             VALUE self = ctx->rubyClientInstance;
-            VALUE rbMonNsIndex = rb_ivar_get(self, rb_intern("@mon_ns_index"));
-            VALUE rbMonNsName = rb_ivar_get(self, rb_intern("@mon_ns_name"));
             
-            if (!NIL_P(rbMonNsName)) {
-                UA_UInt16 monNsIndex = NUM2USHORT(rbMonNsIndex);
-                char* monNsName = StringValueCStr(rbMonNsName);
-                
-                UA_CreateSubscriptionRequest request = UA_CreateSubscriptionRequest_default();
-                UA_CreateSubscriptionResponse response = UA_Client_Subscriptions_create(client, request, NULL, NULL, deleteSubscriptionCallback);
-
-                if (response.responseHeader.serviceResult == UA_STATUSCODE_GOOD) {
-                    printf("Create subscription succeeded, id %u\n", response.subscriptionId);
-
-                    UA_MonitoredItemCreateRequest monRequest = UA_MonitoredItemCreateRequest_default(UA_NODEID_STRING(monNsIndex, monNsName));
-
-                    UA_MonitoredItemCreateResult monResponse =
-                    UA_Client_MonitoredItems_createDataChange(client, response.subscriptionId,
-                                                              UA_TIMESTAMPSTORETURN_BOTH,
-                                                              monRequest, NULL, handler_dataChanged, NULL);
-                    if (monResponse.statusCode == UA_STATUSCODE_GOOD) {
-                        printf("Request to monitor field %hu:%s successful, id %u\n", monNsIndex, monNsName, monResponse.monitoredItemId);
-                    } else {
-                        printf("Request to monitor field failed: %s\n", UA_StatusCode_name(monResponse.statusCode));
-                    }
-
-                    // multiple monitors per subscription are OK.
-                }
+            VALUE callback = rb_ivar_get(self, rb_intern("@callback_after_session_created"));
+            if (!NIL_P(callback)) {
+                VALUE params = rb_ary_new();
+                rb_ary_push(params, self);
+                rb_proc_call(callback, params); // rescue?
             }
             
             break;
@@ -173,6 +148,47 @@ static VALUE rb_connect(VALUE self, VALUE v_connectionString) {
         return Qnil;
     } else {
         return raise_ua_status_error(status);
+    }
+}
+
+static VALUE rb_createSubscription(VALUE self) {
+    struct UninitializedClient * uclient;
+    TypedData_Get_Struct(self, struct UninitializedClient, &UA_Client_Type, uclient);
+    UA_Client *client = uclient->client;
+    
+    UA_CreateSubscriptionRequest request = UA_CreateSubscriptionRequest_default();
+    UA_CreateSubscriptionResponse response = UA_Client_Subscriptions_create(client, request, NULL, NULL, deleteSubscriptionCallback);
+    
+    if (response.responseHeader.serviceResult == UA_STATUSCODE_GOOD) {
+        UA_UInt32 subscriptionId = response.subscriptionId;
+        return UINT2NUM(subscriptionId);
+    } else {
+        return Qnil;
+    }
+}
+
+static VALUE rb_addMonitoredItem(VALUE self, VALUE v_subscriptionId, VALUE v_monNsIndex, VALUE v_monNsName) {
+    struct UninitializedClient * uclient;
+    TypedData_Get_Struct(self, struct UninitializedClient, &UA_Client_Type, uclient);
+    UA_Client *client = uclient->client;
+    
+    UA_UInt32 subscriptionId = NUM2UINT(v_subscriptionId); // TODO: check type
+    UA_UInt16 monNsIndex = NUM2USHORT(v_monNsIndex); // TODO: check type
+    char* monNsName = StringValueCStr(v_monNsName); // TODO: check type
+
+    UA_MonitoredItemCreateRequest monRequest = UA_MonitoredItemCreateRequest_default(UA_NODEID_STRING(monNsIndex, monNsName));
+    
+    UA_MonitoredItemCreateResult monResponse =
+    UA_Client_MonitoredItems_createDataChange(client, subscriptionId,
+                                              UA_TIMESTAMPSTORETURN_BOTH,
+                                              monRequest, NULL, handler_dataChanged, NULL);
+    if (monResponse.statusCode == UA_STATUSCODE_GOOD) {
+        printf("Request to monitor field %hu:%s successful, id %u\n", monNsIndex, monNsName, monResponse.monitoredItemId);
+        UA_UInt32 monitoredItemId = monResponse.monitoredItemId;
+        return UINT2NUM(monitoredItemId);
+    } else {
+        printf("Request to monitor field failed: %s\n", UA_StatusCode_name(monResponse.statusCode));
+        return Qnil;
     }
 }
 
@@ -367,13 +383,24 @@ VALUE rb_run_single_monitoring_cycle_bang(VALUE self) {
     return Qnil;
 }
 
-VALUE _rb_test_callback_exec(VALUE self) {
+VALUE rb_state(VALUE self) {
     struct UninitializedClient * uclient;
     TypedData_Get_Struct(self, struct UninitializedClient, &UA_Client_Type, uclient);
     UA_Client *client = uclient->client;
     
-    VALUE callback = rb_ivar_get(self, rb_intern("@callback"));
-    if (!NIL_P(callback)) rb_proc_call(callback, rb_ary_new());
+    UA_ClientState state = UA_Client_getState(client);
+    
+    if (state == UA_CLIENTSTATE_DISCONNECTED) {
+        return rb_str_export_locale(rb_str_new_cstr("UA_CLIENTSTATE_DISCONNECTED"));
+    } else if (state == UA_CLIENTSTATE_CONNECTED) {
+        return rb_str_export_locale(rb_str_new_cstr("UA_CLIENTSTATE_CONNECTED"));
+    } else if (state == UA_CLIENTSTATE_SECURECHANNEL) {
+        return rb_str_export_locale(rb_str_new_cstr("UA_CLIENTSTATE_SECURECHANNEL"));
+    } else if (state == UA_CLIENTSTATE_SESSION) {
+        return rb_str_export_locale(rb_str_new_cstr("UA_CLIENTSTATE_SESSION"));
+    } else if (state == UA_CLIENTSTATE_SESSION_RENEWED) {
+        return rb_str_export_locale(rb_str_new_cstr("UA_CLIENTSTATE_SESSION_RENEWED"));
+    }
     
     return Qnil;
 }
@@ -397,14 +424,13 @@ void Init_opcua_client()
     rb_define_method(cClient, "run_mon_cycle", rb_run_single_monitoring_cycle, 0);
     rb_define_method(cClient, "do_mon_cycle", rb_run_single_monitoring_cycle, 0);
     
-    rb_define_method(cClient, "_test_callback_exec", _rb_test_callback_exec, 0);
-    
     rb_define_method(cClient, "run_single_monitoring_cycle!", rb_run_single_monitoring_cycle_bang, 0);
     rb_define_method(cClient, "run_mon_cycle!", rb_run_single_monitoring_cycle_bang, 0);
     rb_define_method(cClient, "do_mon_cycle!", rb_run_single_monitoring_cycle_bang, 0);
     
     rb_define_method(cClient, "connect", rb_connect, 1);
     rb_define_method(cClient, "disconnect", rb_disconnect, 0);
+    rb_define_method(cClient, "state", rb_state, 0);
     
     rb_define_method(cClient, "read_int16", rb_readInt16Value, 2);
     rb_define_method(cClient, "read_int32", rb_readInt32Value, 2);
@@ -418,5 +444,8 @@ void Init_opcua_client()
     rb_define_method(cClient, "write_boolean", rb_writeBooleanValue, 3);
     rb_define_method(cClient, "write_bool", rb_writeBooleanValue, 3);
     
+    rb_define_method(cClient, "create_subscription", rb_createSubscription, 0);
+    rb_define_method(cClient, "add_monitored_item", rb_addMonitoredItem, 3);
+
     rb_define_singleton_method(mOPCUAClient, "human_status_code", rb_get_human_UA_StatusCode, 1);
 }
