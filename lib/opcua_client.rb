@@ -1,5 +1,9 @@
 module OPCUAClient
   class << self
+    def new_client
+      OPCUAClient::Client.new
+    end
+
     def start(*args)
       client = OPCUAClient::Client.new
       client.connect(*args)
