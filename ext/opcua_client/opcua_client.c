@@ -13,22 +13,69 @@ struct OpcuaClientContext {
     VALUE rubyClientInstance;
 };
 
+static VALUE toRubyTime(UA_DateTime raw_date) {
+    UA_DateTimeStruct dts = UA_DateTime_toStruct(raw_date);
+    VALUE year = UINT2NUM(dts.year);
+    VALUE month = UINT2NUM(dts.month);
+    VALUE day = UINT2NUM(dts.day);
+    VALUE hour = UINT2NUM(dts.hour);
+    VALUE min = UINT2NUM(dts.min);
+    VALUE sec = UINT2NUM(dts.sec);
+    VALUE millis = UINT2NUM(dts.milliSec);
+    VALUE cDate = rb_const_get(rb_cObject, rb_intern("Time"));
+    VALUE rb_date = rb_funcall(cDate, rb_intern("gm"), 7, year, month, day, hour, min, sec, millis);
+    return rb_date;
+}
+
 static void
 handler_dataChanged(UA_Client *client, UA_UInt32 subId, void *subContext,
                            UA_UInt32 monId, void *monContext, UA_DataValue *value) {
+
     struct OpcuaClientContext *ctx = UA_Client_getContext(client);
     VALUE self = ctx->rubyClientInstance;
     VALUE callback = rb_ivar_get(self, rb_intern("@callback_after_data_changed"));
-    if (!NIL_P(callback)) rb_proc_call(callback, rb_ary_new());
+    
+    if (NIL_P(callback)) {
+        return;
+    }
+    
+    VALUE v_serverTime = Qnil;
+    if (value->hasServerTimestamp) {
+        v_serverTime = toRubyTime(value->serverTimestamp);
+    }
+    
+    VALUE v_sourceTime = Qnil;
+    if (value->hasSourceTimestamp) {
+        v_sourceTime = toRubyTime(value->sourceTimestamp);
+    }
+    
+    VALUE params = rb_ary_new();
+    rb_ary_push(params, UINT2NUM(subId));
+    rb_ary_push(params, UINT2NUM(monId));
+    rb_ary_push(params, v_serverTime);
+    rb_ary_push(params, v_sourceTime);
+    
+    VALUE v_newValue = Qnil;
     
     if(UA_Variant_hasScalarType(&value->value, &UA_TYPES[UA_TYPES_DATETIME])) {
         UA_DateTime raw_date = *(UA_DateTime *) value->value.data;
-        UA_DateTimeStruct dts = UA_DateTime_toStruct(raw_date);
-        printf("New date is: %02u-%02u-%04u %02u:%02u:%02u.%03u\n", dts.day, dts.month, dts.year, dts.hour, dts.min, dts.sec, dts.milliSec);
+        v_newValue = toRubyTime(raw_date);
     } else if (UA_Variant_hasScalarType(&value->value, &UA_TYPES[UA_TYPES_INT32])) {
         UA_Int32 number = *(UA_Int32 *) value->value.data;
-        printf("New number received: %u\n", number);
+        v_newValue = INT2NUM(number);
+    } else if (UA_Variant_hasScalarType(&value->value, &UA_TYPES[UA_TYPES_INT16])) {
+        UA_Int16 number = *(UA_Int16 *) value->value.data;
+        v_newValue = INT2NUM(number);
+    } else if (UA_Variant_hasScalarType(&value->value, &UA_TYPES[UA_TYPES_BOOLEAN])) {
+        UA_Boolean b = *(UA_Boolean *) value->value.data;
+        v_newValue = b ? Qtrue : Qfalse;
+    } else if (UA_Variant_hasScalarType(&value->value, &UA_TYPES[UA_TYPES_FLOAT])) {
+        UA_Float dbl = *(UA_Float *) value->value.data;
+        v_newValue = DBL2NUM(dbl);
     }
+    
+    rb_ary_push(params, v_newValue);
+    rb_proc_call(callback, params);
 }
 
 static void
