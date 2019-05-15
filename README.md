@@ -10,7 +10,7 @@ Add it to your Gemfile:
 gem 'opcua_client'
 ```
 
-## Usage
+## Basic usage
 
 Use `start` helper to automatically close connections:
 
@@ -40,6 +40,31 @@ ensure
 end
 ```
 
+## Subscriptions and monitoring
+
+```ruby
+cli = OPCUAClient::Client.new
+
+cli.after_session_created do |cli|
+  subscription_id = cli.create_subscription
+  ns_index = 1
+  ns_name = "the.answer"
+  cli.add_monitored_item(subscription_id, ns_index, ns_name)
+end
+
+cli.after_data_changed do |subscription_id, monitor_id, server_time, source_time, new_value|
+  puts("data changed: " + [subscription_id, monitor_id, server_time, source_time, new_value].inspect)
+end
+
+cli.connect("opc.tcp://127.0.0.1:4840")
+
+loop do
+  cli.connect("opc.tcp://127.0.0.1:4840") # no-op if connected
+  cli.run_mon_cycle
+  sleep(0.2)
+end
+```
+
 ## Contribute
 
 ### Set up
@@ -52,7 +77,6 @@ bundle
 
 ```console
 $ rake compile
-$ pry
-pry> require 'opcua_client'
+$ bin/console
 pry> client = OPCUAClient::Client.new
 ```
