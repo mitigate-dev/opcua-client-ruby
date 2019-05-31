@@ -40,6 +40,30 @@ ensure
 end
 ```
 
+### Available methods - connection:
+
+* ```client.connect(String url)``` - raises OPCUAClient::Error if unsuccessful
+* ```client.disconnect => Fixnum``` - returns status
+
+### Available methods - reads and writes:
+
+All methods raise OPCUAClient::Error if unsuccessful.
+
+* ```client.read_int16(Fixnum ns, String name) => Fixnum```
+* ```client.read_int32(Fixnum ns, String name) => Fixnum```
+* ```client.read_float(Fixnum ns, String name) => Float```
+* ```client.read_boolean(Fixnum ns, String name) => true/false```
+* ```client.write_int16(Fixnum ns, String name, Fixnum value)```
+* ```client.write_int32(Fixnum ns, String name, Fixnum value)```
+* ```client.write_float(Fixnum ns, String name, Float value)```
+* ```client.write_boolean(Fixnum ns, String name, bool value)```
+
+### Available methods - misc:
+
+* ```client.state => Fixnum``` - client internal state
+* ```client.human_state => String``` - human readable client internal state
+* ```OPCUAClient::Client.human_status_code(Fixnum status) => String``` - returns human status for status
+
 ## Subscriptions and monitoring
 
 ```ruby
@@ -48,8 +72,8 @@ cli = OPCUAClient::Client.new
 cli.after_session_created do |cli|
   subscription_id = cli.create_subscription
   ns_index = 1
-  ns_name = "the.answer"
-  cli.add_monitored_item(subscription_id, ns_index, ns_name)
+  node_name = "the.answer"
+  cli.add_monitored_item(subscription_id, ns_index, node_name)
 end
 
 cli.after_data_changed do |subscription_id, monitor_id, server_time, source_time, new_value|
@@ -64,6 +88,17 @@ loop do
   sleep(0.2)
 end
 ```
+
+### Available methods:
+
+* ```client.create_subscription => Fixnum``` - nil if error
+* ```client.add_monitored_item(Fixnum subscription, Fixnum ns, String name) => Fixnum``` - nil if error
+* ```client.run_mon_cycle``` - returns status
+* ```client.run_mon_cycle!``` - raises OPCUAClient::Error if unsuccessful
+
+### Available callbacks:
+* ```after_session_created```
+* ```after_data_changed```
 
 ## Contribute
 
