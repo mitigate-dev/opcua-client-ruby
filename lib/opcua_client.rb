@@ -14,5 +14,4 @@ module OPCUAClient
   end
 end
 
-require "opcua_client/opcua_client"
 require "opcua_client/client"
