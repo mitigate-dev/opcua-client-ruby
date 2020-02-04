@@ -247,6 +247,152 @@ static VALUE rb_disconnect(VALUE self) {
     return RB_UINT2NUM(status);
 }
 
+static UA_StatusCode multiWrite(UA_Client *client, const UA_NodeId *nodeId, const UA_Variant *in, const long varsSize) {
+    UA_AttributeId attributeId = UA_ATTRIBUTEID_VALUE;
+    
+    UA_UInt16 wvSize = UA_TYPES[UA_TYPES_WRITEVALUE].memSize;
+    
+    UA_WriteValue *wValues = UA_calloc(varsSize, wvSize);
+    
+    for (int i=0; i<varsSize; i++) {
+        UA_WriteValue *wValue = &wValues[i];
+        wValue->attributeId = attributeId;
+        wValue->nodeId = nodeId[i];
+        wValue->value.value = in[i];
+        wValue->value.hasValue = true;
+    }
+    
+    UA_WriteRequest wReq;
+    UA_WriteRequest_init(&wReq);
+    wReq.nodesToWrite = wValues;
+    wReq.nodesToWriteSize = varsSize;
+
+    UA_WriteResponse wResp = UA_Client_Service_write(client, wReq);
+
+    UA_StatusCode retval = wResp.responseHeader.serviceResult;
+    if(retval == UA_STATUSCODE_GOOD) {
+        if(wResp.resultsSize == varsSize) {
+            retval = wResp.results[0];
+            
+            for (int i=0; i<wResp.resultsSize; i++) {
+                if (wResp.results[i] != UA_STATUSCODE_GOOD) {
+                    retval = wResp.results[i];
+                    // printf("%s\n", "multiWrite: bad result found");
+                    break;
+                }
+            }
+            
+            if (retval == UA_STATUSCODE_GOOD) {
+                // printf("%s\n", "multiWrite: all vars written");
+            }
+        } else {
+            retval = UA_STATUSCODE_BADUNEXPECTEDERROR;
+            // printf("%s\n", "multiWrite: bad resultsSize");
+        }
+    } else {
+        // printf("%s\n", "multiWrite: bad write");
+    }
+
+    UA_WriteResponse_deleteMembers(&wResp);
+    UA_free(wValues);
+    
+    return retval;
+}
+
+static VALUE rb_writeUaValues(VALUE self, VALUE v_nsIndex, VALUE v_aryNames, VALUE v_aryNewValues, int uaType) {
+    if (RB_TYPE_P(v_nsIndex, T_FIXNUM) != 1) {
+        return raise_invalid_arguments_error();
+    }
+    
+    Check_Type(v_aryNames, T_ARRAY);
+    Check_Type(v_aryNewValues, T_ARRAY);
+    
+    const long namesCount = RARRAY_LEN(v_aryNames);
+    const long valuesCount = RARRAY_LEN(v_aryNewValues);
+    
+    if (namesCount != valuesCount) {
+        return raise_invalid_arguments_error();
+    }
+    
+    int nsIndex = FIX2INT(v_nsIndex);
+    
+    struct UninitializedClient * uclient;
+    TypedData_Get_Struct(self, struct UninitializedClient, &UA_Client_Type, uclient);
+    UA_Client *client = uclient->client;
+    
+    UA_UInt16 nidSize = UA_TYPES[UA_TYPES_NODEID].memSize;
+    UA_UInt16 variantSize = UA_TYPES[UA_TYPES_VARIANT].memSize;
+    
+    UA_NodeId *nodes = UA_calloc(namesCount, nidSize);
+    UA_Variant *values = UA_calloc(namesCount, variantSize);
+    
+    for (int i=0; i<namesCount; i++) {
+        VALUE v_name = rb_ary_entry(v_aryNames, i);
+        VALUE v_newValue = rb_ary_entry(v_aryNewValues, i);
+        
+        if (RB_TYPE_P(v_name, T_STRING) != 1) {
+            return raise_invalid_arguments_error();
+        }
+        
+        char *name = StringValueCStr(v_name);
+        nodes[i] = UA_NODEID_STRING(nsIndex, name);
+        
+        if (uaType == UA_TYPES_INT16) {
+            Check_Type(v_newValue, T_FIXNUM);
+            UA_Int16 newValue = NUM2SHORT(v_newValue);
+            values[i].data = UA_malloc(sizeof(UA_Int16));
+            *(UA_Int16*)values[i].data = newValue;
+            values[i].type = &UA_TYPES[UA_TYPES_INT16];
+        } else if (uaType == UA_TYPES_INT32) {
+            Check_Type(v_newValue, T_FIXNUM);
+            UA_Int32 newValue = NUM2INT(v_newValue);
+            values[i].data = UA_malloc(sizeof(UA_Int32));
+            *(UA_Int32*)values[i].data = newValue;
+            values[i].type = &UA_TYPES[UA_TYPES_INT32];
+        } else if (uaType == UA_TYPES_FLOAT) {
+            Check_Type(v_newValue, T_FLOAT);
+            UA_Float newValue = NUM2DBL(v_newValue);
+            values[i].data = UA_malloc(sizeof(UA_Float));
+            *(UA_Float*)values[i].data = newValue;
+            values[i].type = &UA_TYPES[UA_TYPES_FLOAT];
+        } else if (uaType == UA_TYPES_BOOLEAN) {
+            if (RB_TYPE_P(v_newValue, T_TRUE) != 1 && RB_TYPE_P(v_newValue, T_FALSE) != 1) {
+                return raise_invalid_arguments_error();
+            }
+            UA_Boolean newValue = RTEST(v_newValue);
+            values[i].data = UA_malloc(sizeof(UA_Boolean));
+            *(UA_Boolean*)values[i].data = newValue;
+            values[i].type = &UA_TYPES[UA_TYPES_BOOLEAN];
+        } else {
+            rb_raise(cError, "Unsupported type");
+        }
+    }
+    
+    UA_StatusCode status = multiWrite(client, nodes, values, namesCount);
+    
+    if (status == UA_STATUSCODE_GOOD) {
+        // printf("%s\n", "value write successful");
+    } else {
+        /* Clean up */
+        for (int i=0; i<namesCount; i++) {
+            UA_Variant_deleteMembers(&values[i]);
+        }
+        UA_free(nodes);
+        UA_free(values);
+        
+        return raise_ua_status_error(status);
+    }
+    
+    /* Clean up */
+    for (int i=0; i<namesCount; i++) {
+        UA_Variant_deleteMembers(&values[i]);
+    }
+    UA_free(nodes);
+    UA_free(values);
+    
+    return Qnil;
+}
+
 static VALUE rb_writeUaValue(VALUE self, VALUE v_nsIndex, VALUE v_name, VALUE v_newValue, int uaType) {
     if (RB_TYPE_P(v_name, T_STRING) != 1) {
         return raise_invalid_arguments_error();
@@ -314,16 +460,32 @@ static VALUE rb_writeInt16Value(VALUE self, VALUE v_nsIndex, VALUE v_name, VALUE
     return rb_writeUaValue(self, v_nsIndex, v_name, v_newValue, UA_TYPES_INT16);
 }
 
+static VALUE rb_writeInt16Values(VALUE self, VALUE v_nsIndex, VALUE v_aryNames, VALUE v_aryNewValues) {
+    return rb_writeUaValues(self, v_nsIndex, v_aryNames, v_aryNewValues, UA_TYPES_INT16);
+}
+
 static VALUE rb_writeInt32Value(VALUE self, VALUE v_nsIndex, VALUE v_name, VALUE v_newValue) {
     return rb_writeUaValue(self, v_nsIndex, v_name, v_newValue, UA_TYPES_INT32);
+}
+
+static VALUE rb_writeInt32Values(VALUE self, VALUE v_nsIndex, VALUE v_aryNames, VALUE v_aryNewValues) {
+    return rb_writeUaValues(self, v_nsIndex, v_aryNames, v_aryNewValues, UA_TYPES_INT32);
 }
 
 static VALUE rb_writeBooleanValue(VALUE self, VALUE v_nsIndex, VALUE v_name, VALUE v_newValue) {
     return rb_writeUaValue(self, v_nsIndex, v_name, v_newValue, UA_TYPES_BOOLEAN);
 }
 
+static VALUE rb_writeBooleanValues(VALUE self, VALUE v_nsIndex, VALUE v_aryNames, VALUE v_aryNewValues) {
+    return rb_writeUaValues(self, v_nsIndex, v_aryNames, v_aryNewValues, UA_TYPES_BOOLEAN);
+}
+
 static VALUE rb_writeFloatValue(VALUE self, VALUE v_nsIndex, VALUE v_name, VALUE v_newValue) {
     return rb_writeUaValue(self, v_nsIndex, v_name, v_newValue, UA_TYPES_FLOAT);
+}
+
+static VALUE rb_writeFloatValues(VALUE self, VALUE v_nsIndex, VALUE v_aryNames, VALUE v_aryNewValues) {
+    return rb_writeUaValues(self, v_nsIndex, v_aryNames, v_aryNewValues, UA_TYPES_FLOAT);
 }
 
 static VALUE rb_readUaValue(VALUE self, VALUE v_nsIndex, VALUE v_name, int type) {
@@ -485,6 +647,12 @@ void Init_opcua_client()
     rb_define_method(cClient, "write_float", rb_writeFloatValue, 3);
     rb_define_method(cClient, "write_boolean", rb_writeBooleanValue, 3);
     rb_define_method(cClient, "write_bool", rb_writeBooleanValue, 3);
+    
+    rb_define_method(cClient, "multi_write_int16", rb_writeInt16Values, 3);
+    rb_define_method(cClient, "multi_write_int32", rb_writeInt32Values, 3);
+    rb_define_method(cClient, "multi_write_float", rb_writeFloatValues, 3);
+    rb_define_method(cClient, "multi_write_boolean", rb_writeBooleanValues, 3);
+    rb_define_method(cClient, "multi_write_bool", rb_writeBooleanValues, 3);
     
     rb_define_method(cClient, "create_subscription", rb_createSubscription, 0);
     rb_define_method(cClient, "add_monitored_item", rb_addMonitoredItem, 3);

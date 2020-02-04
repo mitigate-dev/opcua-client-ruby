@@ -35,6 +35,9 @@ begin
   # write to ns=2;s=1
   client.write_int16(2, "1", 888)
   puts client.read_int16(2, "1")
+
+  client.multi_write_int16(2, (1..10).map{|x| "action_#{x}"}, (1..10).map{|x| x * 10}) # 10x writes
+  client.multi_write_int32(2, (1..10).map{|x| "amount_#{x}"}, (1..10).map{|x| x * 10 + 1}) # 10x writes
 ensure
   client.disconnect
 end
@@ -57,6 +60,10 @@ All methods raise OPCUAClient::Error if unsuccessful.
 * ```client.write_int32(Fixnum ns, String name, Fixnum value)```
 * ```client.write_float(Fixnum ns, String name, Float value)```
 * ```client.write_boolean(Fixnum ns, String name, bool value)```
+* ```client.multi_write_int16(Fixnum ns, Array[String] names, Array[Fixnum] values)```
+* ```client.multi_write_int32(Fixnum ns, Array[String] names, Array[Fixnum] values)```
+* ```client.multi_write_float(Fixnum ns, Array[String] names, Array[Float] values)```
+* ```client.multi_write_boolean(Fixnum ns, Array[String] names, Array[bool] values)```
 
 ### Available methods - misc:
 
