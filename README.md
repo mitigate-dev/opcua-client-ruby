@@ -53,11 +53,15 @@ end
 All methods raise OPCUAClient::Error if unsuccessful.
 
 * ```client.read_int16(Fixnum ns, String name) => Fixnum```
+* ```client.read_uint16(Fixnum ns, String name) => Fixnum```
 * ```client.read_int32(Fixnum ns, String name) => Fixnum```
+* ```client.read_uint32(Fixnum ns, String name) => Fixnum```
 * ```client.read_float(Fixnum ns, String name) => Float```
 * ```client.read_boolean(Fixnum ns, String name) => true/false```
 * ```client.write_int16(Fixnum ns, String name, Fixnum value)```
+* ```client.write_uint16(Fixnum ns, String name, Fixnum value)```
 * ```client.write_int32(Fixnum ns, String name, Fixnum value)```
+* ```client.write_uint32(Fixnum ns, String name, Fixnum value)```
 * ```client.write_float(Fixnum ns, String name, Float value)```
 * ```client.write_boolean(Fixnum ns, String name, bool value)```
 * ```client.multi_write_int16(Fixnum ns, Array[String] names, Array[Fixnum] values)```
@@ -121,4 +125,5 @@ bundle
 $ rake compile
 $ bin/console
 pry> client = OPCUAClient::Client.new
+pry> client.connect("opc.tcp://127.0.0.1:4840")
 ```
