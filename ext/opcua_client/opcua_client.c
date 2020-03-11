@@ -247,6 +247,66 @@ static VALUE rb_disconnect(VALUE self) {
     return RB_UINT2NUM(status);
 }
 
+static UA_StatusCode multiRead(UA_Client *client, const UA_NodeId *nodeId, UA_Variant *out, const long varsCount) {
+        
+    UA_UInt16 rvSize = UA_TYPES[UA_TYPES_READVALUEID].memSize;
+    UA_ReadValueId *rValues = UA_calloc(varsCount, rvSize);
+    
+    for (int i=0; i<varsCount; i++) {
+        UA_ReadValueId *readItem = &rValues[i];
+        readItem->nodeId = nodeId[i];
+        readItem->attributeId = UA_ATTRIBUTEID_VALUE;
+    }
+    
+    UA_ReadRequest request;
+    UA_ReadRequest_init(&request);
+    request.nodesToRead = rValues;
+    request.nodesToReadSize = varsCount;
+    
+    UA_ReadResponse response = UA_Client_Service_read(client, request);
+    UA_StatusCode retval = response.responseHeader.serviceResult;
+    if(retval == UA_STATUSCODE_GOOD) {
+        if(response.resultsSize == varsCount)
+            retval = response.results[0].status;
+        else
+            retval = UA_STATUSCODE_BADUNEXPECTEDERROR;
+    }
+    
+    if(retval != UA_STATUSCODE_GOOD) {
+        UA_ReadResponse_deleteMembers(&response);
+        UA_free(rValues);
+        return retval;
+    }
+    
+    /* Set the StatusCode */
+    UA_DataValue *results = response.results;
+    
+    if (response.resultsSize != varsCount) {
+        retval = UA_STATUSCODE_BADUNEXPECTEDERROR;
+        UA_ReadResponse_deleteMembers(&response);
+        UA_free(rValues);
+        return retval;
+    }
+    
+    for (int i=0; i<varsCount; i++) {
+        if ((results[i].hasStatus && results[i].status != UA_STATUSCODE_GOOD) || !results[i].hasValue) {
+            retval = UA_STATUSCODE_BADUNEXPECTEDERROR;
+            UA_ReadResponse_deleteMembers(&response);
+            UA_free(rValues);
+            return retval;
+        }
+    }
+    
+    for (int i=0; i<varsCount; i++) {
+        out[i] = results[i].value;
+        UA_Variant_init(&results[i].value);
+    }
+    
+    UA_ReadResponse_deleteMembers(&response);
+    UA_free(rValues);
+    return retval;
+}
+
 static UA_StatusCode multiWrite(UA_Client *client, const UA_NodeId *nodeId, const UA_Variant *in, const long varsSize) {
     UA_AttributeId attributeId = UA_ATTRIBUTEID_VALUE;
     
@@ -297,6 +357,96 @@ static UA_StatusCode multiWrite(UA_Client *client, const UA_NodeId *nodeId, cons
     UA_free(wValues);
     
     return retval;
+}
+
+static VALUE rb_readUaValues(VALUE self, VALUE v_nsIndex, VALUE v_aryNames) {
+    if (RB_TYPE_P(v_nsIndex, T_FIXNUM) != 1) {
+        return raise_invalid_arguments_error();
+    }
+    
+    Check_Type(v_aryNames, T_ARRAY);
+    const long namesCount = RARRAY_LEN(v_aryNames);
+    
+    int nsIndex = FIX2INT(v_nsIndex);
+    
+    struct UninitializedClient * uclient;
+    TypedData_Get_Struct(self, struct UninitializedClient, &UA_Client_Type, uclient);
+    UA_Client *client = uclient->client;
+    
+    UA_UInt16 nidSize = UA_TYPES[UA_TYPES_NODEID].memSize;
+    UA_UInt16 variantSize = UA_TYPES[UA_TYPES_VARIANT].memSize;
+    
+    UA_NodeId *nodes = UA_calloc(namesCount, nidSize);
+    UA_Variant *readValues = UA_calloc(namesCount, variantSize);
+    
+    for (int i=0; i<namesCount; i++) {
+        VALUE v_name = rb_ary_entry(v_aryNames, i);
+        
+        if (RB_TYPE_P(v_name, T_STRING) != 1) {
+            return raise_invalid_arguments_error();
+        }
+        
+        char *name = StringValueCStr(v_name);
+        nodes[i] = UA_NODEID_STRING(nsIndex, name);
+    }
+    
+    UA_StatusCode status = multiRead(client, nodes, readValues, namesCount);
+    
+    VALUE resultArray = Qnil;
+    
+    if (status == UA_STATUSCODE_GOOD) {
+        // printf("%s\n", "value read successful");
+        
+        resultArray = rb_ary_new2(namesCount);
+        
+        for (int i=0; i<namesCount; i++) {
+            // printf("the value is: %i\n", val);
+            
+            VALUE rubyVal = Qnil;
+            
+            if (UA_Variant_hasScalarType(&readValues[i], &UA_TYPES[UA_TYPES_INT16])) {
+                UA_Int16 val = *(UA_Int16*)readValues[i].data;
+                rubyVal = INT2FIX(val);
+            } else if (UA_Variant_hasScalarType(&readValues[i], &UA_TYPES[UA_TYPES_UINT16])) {
+                UA_UInt16 val = *(UA_UInt16*)readValues[i].data;
+                rubyVal = INT2FIX(val);
+            } else if (UA_Variant_hasScalarType(&readValues[i], &UA_TYPES[UA_TYPES_INT32])) {
+                 UA_Int32 val = *(UA_Int32*)readValues[i].data;
+                 rubyVal = INT2FIX(val);
+            } else if (UA_Variant_hasScalarType(&readValues[i], &UA_TYPES[UA_TYPES_UINT32])) {
+                 UA_UInt32 val = *(UA_UInt32*)readValues[i].data;
+                 rubyVal = INT2FIX(val);
+            } else if (UA_Variant_hasScalarType(&readValues[i], &UA_TYPES[UA_TYPES_BOOLEAN])) {
+                 UA_Boolean val = *(UA_Boolean*)readValues[i].data;
+                 rubyVal = val ? Qtrue : Qfalse;
+            } else if (UA_Variant_hasScalarType(&readValues[i], &UA_TYPES[UA_TYPES_FLOAT])) {
+                 UA_Float val = *(UA_Float*)readValues[i].data;
+                 rubyVal = DBL2NUM(val);
+            } else {
+                rubyVal = Qnil; // unsupported
+            }
+            
+            rb_ary_push(resultArray, rubyVal);
+        }
+    } else {
+        /* Clean up */
+        for (int i=0; i<namesCount; i++) {
+            UA_Variant_deleteMembers(&readValues[i]);
+        }
+        UA_free(nodes);
+        UA_free(readValues);
+        
+        return raise_ua_status_error(status);
+    }
+    
+    /* Clean up */
+    for (int i=0; i<namesCount; i++) {
+        UA_Variant_deleteMembers(&readValues[i]);
+    }
+    UA_free(nodes);
+    UA_free(readValues);
+    
+    return resultArray;
 }
 
 static VALUE rb_writeUaValues(VALUE self, VALUE v_nsIndex, VALUE v_aryNames, VALUE v_aryNewValues, int uaType) {
@@ -694,6 +844,8 @@ void Init_opcua_client()
     rb_define_method(cClient, "multi_write_float", rb_writeFloatValues, 3);
     rb_define_method(cClient, "multi_write_boolean", rb_writeBooleanValues, 3);
     rb_define_method(cClient, "multi_write_bool", rb_writeBooleanValues, 3);
+    
+    rb_define_method(cClient, "multi_read", rb_readUaValues, 2);
     
     rb_define_method(cClient, "create_subscription", rb_createSubscription, 0);
     rb_define_method(cClient, "add_monitored_item", rb_addMonitoredItem, 3);
