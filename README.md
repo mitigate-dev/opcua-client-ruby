@@ -65,7 +65,9 @@ All methods raise OPCUAClient::Error if unsuccessful.
 * ```client.write_float(Fixnum ns, String name, Float value)```
 * ```client.write_boolean(Fixnum ns, String name, bool value)```
 * ```client.multi_write_int16(Fixnum ns, Array[String] names, Array[Fixnum] values)```
+* ```client.multi_write_uint16(Fixnum ns, Array[String] names, Array[Fixnum] values)```
 * ```client.multi_write_int32(Fixnum ns, Array[String] names, Array[Fixnum] values)```
+* ```client.multi_write_uint32(Fixnum ns, Array[String] names, Array[Fixnum] values)```
 * ```client.multi_write_float(Fixnum ns, Array[String] names, Array[Float] values)```
 * ```client.multi_write_boolean(Fixnum ns, Array[String] names, Array[bool] values)```
 
