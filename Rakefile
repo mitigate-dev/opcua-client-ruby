@@ -9,3 +9,5 @@ end
 RSpec::Core::RakeTask.new('spec') do |t|
   t.verbose = true
 end
+
+Rake::Task[:spec].prerequisites << :compile
