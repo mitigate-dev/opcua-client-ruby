@@ -2,6 +2,8 @@
 
 Incomplete OPC-UA client library for Ruby. Wraps open62541: <https://open62541.org>.
 
+![ci-badge](https://github.com/mak-it/opcua-client-ruby/actions/workflows/build.yml/badge.svg)
+
 ## Installation
 
 Add it to your Gemfile:

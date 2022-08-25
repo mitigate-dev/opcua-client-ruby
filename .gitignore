@@ -5,7 +5,8 @@ Makefile
 *.so
 *.a
 mkmf.log
-Gemfile.lock
-.ruby-gemset
-.ruby-version
-opcua_client-*.gem
+/Gemfile.lock
+/.ruby-gemset
+/.ruby-version
+/opcua_client-*.gem
+/tmp
