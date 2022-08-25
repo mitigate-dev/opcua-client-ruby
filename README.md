@@ -124,7 +124,7 @@ bundle
 ### Try out changes
 
 ```console
-$ rake compile
+$ bin/rake compile
 $ bin/console
 pry> client = OPCUAClient::Client.new
 pry> client.connect("opc.tcp://127.0.0.1:4840")
