@@ -818,10 +818,13 @@ void Init_opcua_client()
 #endif
 
     mOPCUAClient = rb_const_get(rb_cObject, rb_intern("OPCUAClient"));
+    rb_global_variable(&mOPCUAClient);
     defineStateContants(mOPCUAClient);
 
     cError = rb_define_class_under(mOPCUAClient, "Error", rb_eStandardError);
+    rb_global_variable(&cError);
     cClient = rb_define_class_under(mOPCUAClient, "Client", rb_cObject);
+    rb_global_variable(&cClient);
 
     rb_define_alloc_func(cClient, allocate);
 
