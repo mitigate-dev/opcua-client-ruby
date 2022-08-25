@@ -2,6 +2,8 @@
 
 Incomplete OPC-UA client library for Ruby. Wraps open62541: <https://open62541.org>.
 
+![ci-badge](https://github.com/mak-it/opcua-client-ruby/actions/workflows/build.yml/badge.svg)
+
 ## Installation
 
 Add it to your Gemfile:
@@ -124,8 +126,15 @@ bundle
 ### Try out changes
 
 ```console
-$ rake compile
+$ bin/rake compile
 $ bin/console
 pry> client = OPCUAClient::Client.new
 pry> client.connect("opc.tcp://127.0.0.1:4840")
+```
+
+### Test it
+
+```console
+$ bin/rake compile
+$ bin/rake spec
 ```
