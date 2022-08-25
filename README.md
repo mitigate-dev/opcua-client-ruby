@@ -129,3 +129,10 @@ $ bin/console
 pry> client = OPCUAClient::Client.new
 pry> client.connect("opc.tcp://127.0.0.1:4840")
 ```
+
+### Test it
+
+```console
+$ bin/rake compile
+$ bin/rake spec
+```
