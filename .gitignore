@@ -1,5 +1,5 @@
 .DS_Store
-Makefile
+/ext/opcua_client/Makefile
 *.o
 *.bundle
 *.so
@@ -10,3 +10,4 @@ mkmf.log
 /.ruby-version
 /opcua_client-*.gem
 /tmp
+/tools/server/server
