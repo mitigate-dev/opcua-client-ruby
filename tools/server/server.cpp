@@ -81,14 +81,15 @@ static void addVariables(UA_Server *server) {
     UA_Int16 ns4Id = UA_Server_addNamespace(server, "ns4"); // id=4
     UA_Int16 ns5Id = UA_Server_addNamespace(server, "ns5"); // id=5
 
-    addVariableV2(server, ns5Id, UA_TYPES_UINT32, "uint32a");
-    addVariableV2(server, ns5Id, UA_TYPES_UINT32, "uint32b", 1000);
-    addVariableV2(server, ns5Id, UA_TYPES_UINT32, "uint32c", 2000);
-    addVariableV2(server, ns5Id, UA_TYPES_UINT16, "uint16a");
-    addVariableV2(server, ns5Id, UA_TYPES_UINT16, "uint16b", 100);
-    addVariableV2(server, ns5Id, UA_TYPES_UINT16, "uint16c", 200);
-    addVariableV2(server, ns5Id, UA_TYPES_BOOLEAN, "true_var", true);
-    addVariableV2(server, ns5Id, UA_TYPES_BOOLEAN, "false_var", false);
+    addVariableV2(server, ns5Id, UA_TYPES_UINT32, "uint32_a");
+    addVariableV2(server, ns5Id, UA_TYPES_UINT32, "uint32_b", 1000);
+    addVariableV2(server, ns5Id, UA_TYPES_UINT32, "uint32_c", 2000);
+    addVariableV2(server, ns5Id, UA_TYPES_UINT16, "uint16_a");
+    addVariableV2(server, ns5Id, UA_TYPES_UINT16, "uint16_b", 100);
+    addVariableV2(server, ns5Id, UA_TYPES_UINT16, "uint16_c", 200);
+    addVariableV2(server, ns5Id, UA_TYPES_BOOLEAN, "bool_a", false);
+    addVariableV2(server, ns5Id, UA_TYPES_BOOLEAN, "bool_true", true);
+    addVariableV2(server, ns5Id, UA_TYPES_BOOLEAN, "bool_false", false);
 }
 
 int main(void) {

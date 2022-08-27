@@ -12,4 +12,12 @@ RSpec.describe OPCUAClient::Client do
       expect(state).to eq(0)
     end
   end
+
+  context "connection" do
+    it "connects" do
+      client = OPCUAClient::Client.new
+      client.connect("opc.tcp://127.0.0.1:4840")
+      expect(client.state).to eq(3) # UA_CLIENTSTATE_SESSION
+    end
+  end
 end

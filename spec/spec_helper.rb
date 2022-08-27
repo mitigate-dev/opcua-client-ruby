@@ -12,7 +12,7 @@ def new_client(connect: true)
   client = OPCUAClient::Client.new
 
   if connect
-    # TODO
+    client.connect("opc.tcp://127.0.0.1:4840")
   end
 
   client
