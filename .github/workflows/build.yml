@@ -22,4 +22,5 @@ jobs:
           bundler-cache: true # runs 'bundle install' and caches installed gems automatically
       - run: make -C tools/server/ clean all
       - run: tools/server/server &
-      - run: bin/rake spec
+      - run: bin/rake compile
+      - run: rspec spec/
