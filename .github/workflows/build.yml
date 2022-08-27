@@ -9,7 +9,6 @@ jobs:
       matrix:
         os:
           - ubuntu-22.04 # jammy
-          - windows-2022
         ruby:
           - '3.1'
       fail-fast: false
@@ -20,6 +19,7 @@ jobs:
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: ${{ matrix.ruby }}
+          bundler-cache: true # runs 'bundle install' and caches installed gems automatically
       - run: make -C tools/server/ clean all
       - run: tools/server/server &
       - run: bin/rake spec
