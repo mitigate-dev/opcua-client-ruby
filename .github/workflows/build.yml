@@ -28,4 +28,4 @@ jobs:
       - run: make -C tools/server/ clean all
       - run: tools/server/server &
       - run: bin/rake compile
-      - run: rspec spec/
+      - run: bundle exec rspec spec/
