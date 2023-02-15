@@ -197,6 +197,32 @@ static VALUE rb_connect(VALUE self, VALUE v_connectionString) {
     }
 }
 
+static VALUE rb_connect_username(VALUE self, VALUE v_connectionString, VALUE v_username, VALUE v_password) {
+    if (
+        RB_TYPE_P(v_connectionString, T_STRING) != 1 ||
+        RB_TYPE_P(v_username, T_STRING) != 1 ||
+        RB_TYPE_P(v_password, T_STRING) != 1
+    ) {
+        return raise_invalid_arguments_error();
+    }
+
+    char *connectionString = StringValueCStr(v_connectionString);
+    char *username = StringValueCStr(v_username);
+    char *password = StringValueCStr(v_password);
+
+    struct UninitializedClient * uclient;
+    TypedData_Get_Struct(self, struct UninitializedClient, &UA_Client_Type, uclient);
+    UA_Client *client = uclient->client;
+
+    UA_StatusCode status = UA_Client_connect_username(client, connectionString, username, password);
+
+    if (status == UA_STATUSCODE_GOOD) {
+        return Qnil;
+    } else {
+        return raise_ua_status_error(status);
+    }
+}
+
 static VALUE rb_createSubscription(VALUE self) {
     struct UninitializedClient * uclient;
     TypedData_Get_Struct(self, struct UninitializedClient, &UA_Client_Type, uclient);
@@ -839,6 +865,7 @@ void Init_opcua_client()
     rb_define_method(cClient, "do_mon_cycle!", rb_run_single_monitoring_cycle_bang, 0);
 
     rb_define_method(cClient, "connect", rb_connect, 1);
+    rb_define_method(cClient, "connect_username", rb_connect_username, 3);
     rb_define_method(cClient, "disconnect", rb_disconnect, 0);
     rb_define_method(cClient, "state", rb_state, 0);
 
